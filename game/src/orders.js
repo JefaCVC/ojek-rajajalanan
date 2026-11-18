@@ -1,261 +1,202 @@
-// Orders, the story arc, streaks, and random events. The order board always
-// holds a few jobs the player can freely choose between; each shows its type,
-// distance, and fare before the player commits. Order types follow the shift:
-// commuters in the morning, school and parcels midday, food in the afternoon,
-// VIPs at night. Premium orders only appear for high-rated drivers.
-//
-// The story arc is five missions against the rival Geng Macan, gated by rank.
-// Random events (flood, protest, crash, VIP, rush parcel) arrive every minute
-// or two and force the player to re-route or grab a bonus.
+// OJEK! King of the Streets — the order board: passenger rides, parcels, hot food,
+// VIPs and rush jobs. Orders show their distance and price up front and the
+// player picks freely; a run is pickup, then delivery, then payout with tip,
+// streak and rating on top.
 
-import { ECONOMY, EVENTS } from './config.js';
-import { STORY as STORY_TEXT } from './text.js';
-import { districtOf } from './city.js';
-import { randomInt, randomPick } from './random.js';
+import * as THREE from 'three';
+import { ORDER_TYPES, districtAt } from './config.js';
+import { worldRandom as rng } from './random.js';
 
-const PASSENGER_NAMES = [
-  'Bu Ratna', 'Pak Haji', 'Mbak Sari', 'Mas Budi', 'Dek Rani', 'Pak Dedi',
-  'Bu Lilis', 'Mas Yoga', 'Mbak Putri', 'Pak Slamet', 'Bu Ani', 'Dek Fajar',
-];
+const NAMES = ['Budi', 'Sari', 'Andi', 'Dewi', 'Rudi', 'Maya', 'Agus', 'Rina', 'Joko', 'Putri', 'Eko', 'Lina', 'Fajar', 'Nina', 'Dedi', 'Wati'];
+const PARCELS = ['clothing parcel', 'documents', 'electronics parcel', 'books', 'cake box', 'bike spare parts'];
+const FOODS = ['fried rice', 'chicken noodles', 'chicken satay', 'meatball soup', 'smashed chicken', 'jumbo iced tea'];
 
-export function createOrders(city, random) {
-  let nextId = 1;
+let orderId = 1;
+
+export function createOrders(scene, city, daycycle, pedestrians) {
   const board = [];
   let active = null;
-  let storyStep = 0;
-  let storyDone = 0;
-  let streak = 0;
-  let eventTimer = 45;
-  let activeEvent = null;
+  let beacon = null;
+  let ring = null;
+  let waitingPed = null;
+  let refreshTimer = 0;
+  let fareMult = 1;
+  let vipBoost = false;
 
-  function distanceBetween(a, b) {
-    // Roads run on a grid, so Manhattan distance is the honest one.
-    return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+  function makeBeacon(color) {
+    const g = new THREE.Group();
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.0, 2.8, 26, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.32, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    beam.position.y = 13;
+    const ground = new THREE.Mesh(
+      new THREE.RingGeometry(1.4, 2.4, 24),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = 0.08;
+    g.add(beam, ground);
+    g.visible = false;
+    scene.add(g);
+    return g;
   }
 
-  function fareFor(type, distance, fareMultiplier, rating) {
-    let fare = ECONOMY.baseFare + distance * ECONOMY.farePerMetre;
-    if (type === 'vip') fare += ECONOMY.vipFareBonus;
-    if (type === 'makanan') fare *= 1.15;
-    fare *= fareMultiplier;
-    if (rating >= ECONOMY.premiumRating) fare *= 1.1;
-    return Math.round(fare / 500) * 500;
+  function surgeNow() {
+    return daycycle.shift.surge * daycycle.weatherInfo.fare;
   }
 
-  function makeOrder(type, districts, fareMultiplier, rating) {
-    const pickup = city.randomRoadsidePointIn(districts);
-    let dest = city.randomRoadsidePointIn(districts);
+  function unlockedDistricts(rank) {
+    // Rank opens the city up: market + kampung first, the rest follows.
+    const all = ['market', 'kampung', 'downtown', 'riverside', 'port'];
+    return all.slice(0, Math.min(all.length, rank + 2));
+  }
+
+  function generateOrder(rank) {
+    const types = ['penumpang', 'penumpang', 'paket', 'paket', 'makanan'];
+    if (rank >= 1) types.push('kilat');
+    if (rank >= 3) types.push('vip');
+    // VIP Magnet: VIP orders open up a rank early and weigh far heavier.
+    if (vipBoost && rank >= 2) types.push('vip', 'vip', 'vip');
+    const type = rng.pick(types);
+    const def = ORDER_TYPES[type];
+    const districts = unlockedDistricts(rank);
+    const pickup = city.randomRoadPointInDistrict(rng, rng.pick(districts));
+    let dest = city.randomRoadPointInDistrict(rng, rng.pick(districts));
     let tries = 0;
-    while (dest && pickup && distanceBetween(pickup, dest) < 500 && tries < 10) {
-      dest = city.randomRoadsidePointIn(districts);
+    while (Math.hypot(dest.x - pickup.x, dest.z - pickup.z) < 90 && tries < 12) {
+      dest = city.randomRoadPoint(rng);
       tries += 1;
     }
-    if (!pickup || !dest) return null;
-    const distance = distanceBetween(pickup, dest);
-    const name = type === 'paket'
-      ? randomPick(random, ['Dokumen', 'Bingkisan', 'Belanjaan', 'Barang toko', 'Paket COD'])
-      : type === 'makanan'
-        ? randomPick(random, ['Nasi goreng', 'Bakso', 'Ayam geprek', 'Es teh', 'Soto ayam'])
-        : randomPick(random, PASSENGER_NAMES);
+    const distance = Math.hypot(dest.x - pickup.x, dest.z - pickup.z);
+    const km = distance / 1000;
+    const fare = Math.round((def.base + def.perKm * km) * surgeNow() * fareMult / 100) * 100;
     const order = {
-      id: nextId++,
+      id: orderId,
       type,
-      name,
+      label: def.label,
+      detail: type === 'penumpang' || type === 'vip'
+        ? rng.pick(NAMES)
+        : type === 'paket' || type === 'kilat'
+          ? rng.pick(PARCELS)
+          : rng.pick(FOODS),
       pickup,
       dest,
-      pickupName: city.nearestRoadName(pickup.x, pickup.y),
-      destName: city.nearestRoadName(dest.x, dest.y),
       distance,
-      fare: fareFor(type, distance, fareMultiplier, rating),
-      rating: randomInt(random, 4, 5),
-      state: 'offered',
-      timeLimit: type === 'makanan' ? ECONOMY.foodTimerSeconds : distance / 260 + 45,
-      timeLeft: 0,
-      crashed: false,
-      story: false,
+      fare,
+      timer: def.timer ? def.timer + Math.round(km * 60) : null,
+      timeLeft: def.timer ? def.timer + Math.round(km * 60) : null,
+      expires: 120,
+      pickupDistrict: districtAt(pickup.x, pickup.z).name,
+      destDistrict: districtAt(dest.x, dest.z).name,
     };
+    orderId += 1;
     return order;
   }
 
-  function makeStoryOrder(step, fareMultiplier) {
-    const def = STORY_TEXT[step];
-    if (!def) return null;
-    const pickup = city.randomRoadsidePoint();
-    let dest = city.randomRoadsidePoint();
-    let tries = 0;
-    while (distanceBetween(pickup, dest) < 600 && tries < 10) {
-      dest = city.randomRoadsidePoint();
-      tries += 1;
+  function fillBoard(rank) {
+    while (board.length < 7) board.push(generateOrder(rank));
+  }
+
+  function setBeacon(target, color) {
+    if (!beacon) beacon = makeBeacon(0x2eff8a);
+    if (!ring) ring = makeBeacon(0x2eff8a);
+    beacon.visible = true;
+    beacon.position.set(target.x, 0, target.z);
+    beacon.children.forEach((c) => c.material.color.setHex(color));
+  }
+
+  function hideBeacon() {
+    if (beacon) beacon.visible = false;
+  }
+
+  function accept(id, playerPos) {
+    if (active) return null;
+    const idx = board.findIndex((o) => o.id === id);
+    if (idx < 0) return null;
+    const order = board.splice(idx, 1)[0];
+    order.stage = 'pickup';
+    order.startedAt = Date.now();
+    active = order;
+    waitingPed = pedestrians.spawnWaiting(order.pickup);
+    setBeacon(order.pickup, 0x2eff8a);
+    return order;
+  }
+
+  function cancel() {
+    if (!active) return null;
+    const order = active;
+    active = null;
+    hideBeacon();
+    if (waitingPed) { pedestrians.removeWaiting(waitingPed); waitingPed = null; }
+    return order;
+  }
+
+  // Returns an event object when something happens this frame, else null.
+  function update(dt, playerPos, rank) {
+    refreshTimer -= dt;
+    if (refreshTimer <= 0) {
+      refreshTimer = 4;
+      for (let i = board.length - 1; i >= 0; i -= 1) {
+        board[i].expires -= 4;
+        if (board[i].expires <= 0) board.splice(i, 1);
+      }
+      fillBoard(rank);
     }
+    if (beacon && beacon.visible) {
+      beacon.rotation.y += dt * 1.2;
+      const s = 1 + Math.sin(Date.now() / 300) * 0.06;
+      beacon.scale.set(s, 1, s);
+    }
+    if (!active) return null;
+    if (active.timeLeft != null) {
+      active.timeLeft -= dt;
+      if (active.timeLeft <= 0) {
+        const failed = active;
+        cancel();
+        return { kind: 'failed', order: failed, reason: 'Time ran out' };
+      }
+    }
+    const target = active.stage === 'pickup' ? active.pickup : active.dest;
+    const d = Math.hypot(playerPos.x - target.x, playerPos.z - target.z);
+    if (d < 7) {
+      if (active.stage === 'pickup') {
+        active.stage = 'deliver';
+        if (waitingPed) { pedestrians.removeWaiting(waitingPed); waitingPed = null; }
+        setBeacon(active.dest, 0xffd24a);
+        return { kind: 'pickup', order: active };
+      }
+      const done = active;
+      active = null;
+      hideBeacon();
+      return { kind: 'delivered', order: done };
+    }
+    return null;
+  }
+
+  function targetInfo(playerPos) {
+    if (!active) return null;
+    const target = active.stage === 'pickup' ? active.pickup : active.dest;
     return {
-      id: nextId++,
-      type: step === 2 ? 'penumpang' : step === 3 ? 'penumpang' : 'penumpang',
-      name: def.title,
-      pickup,
-      dest,
-      pickupName: city.nearestRoadName(pickup.x, pickup.y),
-      destName: city.nearestRoadName(dest.x, dest.y),
-      distance: distanceBetween(pickup, dest),
-      fare: Math.round(def.fare * fareMultiplier / 500) * 500,
-      rating: 5,
-      state: 'offered',
-      timeLimit: distanceBetween(pickup, dest) / 260 + 60,
-      timeLeft: 0,
-      crashed: false,
-      story: true,
-      storyId: def.id,
-      storyStep: step,
-      brief: def.brief,
-      doneText: def.done,
+      order: active,
+      target,
+      distance: Math.hypot(playerPos.x - target.x, playerPos.z - target.z),
+      stage: active.stage,
     };
   }
 
   return {
-    get board() { return board; },
+    board,
     get active() { return active; },
-    get storyStep() { return storyStep; },
-    get storyDone() { return storyDone; },
-    get streak() { return streak; },
-    get activeEvent() { return activeEvent; },
-    get streakMultiplier() {
-      return Math.min(ECONOMY.streakMaxMultiplier, 1 + streak * ECONOMY.streakBonusPerStreak);
-    },
-
-    /** Refills the board to five offers, using the shift's order types. */
-    refreshBoard(shift, districts, fareMultiplier, rating, rankTier) {
-      while (board.length < 5) {
-        let type = randomPick(random, shift.orderTypes);
-        if (type === 'vip' && rating < ECONOMY.premiumRating && random() < 0.7) type = 'penumpang';
-        if (rankTier < 3 && type === 'vip') type = 'penumpang';
-        const order = makeOrder(type, districts, fareMultiplier, rating);
-        if (!order) break;
-        board.push(order);
-      }
-      // The next story mission sits on the board as a gold card when unlocked.
-      const hasStory = board.some((o) => o.story);
-      if (!hasStory && storyStep < STORY_TEXT.length) {
-        const story = makeStoryOrder(storyStep, fareMultiplier);
-        if (story) board.unshift(story);
-      }
-    },
-
-    accept(orderId) {
-      if (active) return null;
-      const index = board.findIndex((o) => o.id === orderId);
-      if (index === -1) return null;
-      active = board.splice(index, 1)[0];
-      active.state = 'to-pickup';
-      active.timeLeft = active.timeLimit;
-      return active;
-    },
-
-    markPickedUp() {
-      if (!active) return;
-      active.state = 'to-dest';
-    },
-
-    markCrashed() {
-      if (active) active.crashed = true;
-    },
-
-    /** Completes the active order. Returns the payout breakdown, or null. */
-    complete() {
-      if (!active) return null;
-      const order = active;
-      active = null;
-      const onTime = order.timeLeft > 0;
-      const streakBefore = streak;
-      if (onTime) streak += 1;
-      else streak = 0;
-      const multiplier = onTime
-        ? Math.min(ECONOMY.streakMaxMultiplier, 1 + streakBefore * ECONOMY.streakBonusPerStreak)
-        : 1;
-      const fare = Math.round(order.fare * multiplier);
-      let tip = 0;
-      if (onTime && !order.crashed) {
-        tip = Math.round(order.fare * (order.type === 'vip' ? ECONOMY.premiumTipRate : ECONOMY.tipRate));
-      }
-      const xp = 10 + Math.round(order.fare / 2000) + (order.story ? 20 : 0);
-      let storyAdvanced = false;
-      if (order.story) {
-        storyDone += 1;
-        storyStep += 1;
-        storyAdvanced = true;
-      }
-      return { order, fare, tip, xp, onTime, streak, multiplier, storyAdvanced };
-    },
-
-    cancelActive() {
-      if (!active) return;
-      active = null;
-      streak = 0;
-    },
-
-    update(dt, onEvent) {
-      if (active) {
-        active.timeLeft -= dt;
-        if (active.timeLeft <= -30) {
-          // Far too late: the passenger gives up and the order is lost.
-          active = null;
-          streak = 0;
-          if (onEvent) onEvent({ type: 'order-expired' });
-        }
-      }
-      eventTimer -= dt;
-      if (eventTimer <= 0) {
-        eventTimer = EVENTS.minGapSeconds + random() * (EVENTS.maxGapSeconds - EVENTS.minGapSeconds);
-        const kind = randomPick(random, EVENTS.types);
-        if (kind === 'banjir' || kind === 'demo' || kind === 'kecelakaan') {
-          const closure = city.addClosure(kind, EVENTS.closureDurationSeconds);
-          if (closure) {
-            activeEvent = { kind, closure, timeLeft: EVENTS.closureDurationSeconds };
-            if (onEvent) onEvent({ type: 'event', kind, closure });
-          }
-        } else {
-          activeEvent = { kind, timeLeft: 60 };
-          if (onEvent) onEvent({ type: 'event', kind });
-        }
-      }
-      if (activeEvent) {
-        activeEvent.timeLeft -= dt;
-        if (activeEvent.timeLeft <= 0) {
-          const ended = activeEvent;
-          activeEvent = null;
-          if (onEvent && (ended.kind === 'banjir' || ended.kind === 'demo' || ended.kind === 'kecelakaan')) {
-            onEvent({ type: 'event-over', kind: ended.kind });
-          }
-        }
-      }
-    },
-
-    /** A rush parcel or VIP event order, pushed straight to the board. */
-    pushEventOrder(kind, districts, fareMultiplier, rating) {
-      const type = kind === 'paket-kilat' ? 'paket' : 'vip';
-      const order = makeOrder(type, districts, fareMultiplier, rating);
-      if (!order) return null;
-      order.fare = Math.round(order.fare * 1.6 / 500) * 500;
-      order.timeLimit = Math.min(order.timeLimit, 60);
-      order.event = true;
-      board.unshift(order);
-      return order;
-    },
-
-    serialize() {
-      return {
-        storyStep, storyDone, streak,
-        board: board.map((o) => ({ ...o, pickup: o.pickup, dest: o.dest })),
-        active: active ? { ...active } : null,
-      };
-    },
-
-    restore(data) {
-      if (!data) return;
-      storyStep = data.storyStep || 0;
-      storyDone = data.storyDone || 0;
-      streak = data.streak || 0;
-      board.length = 0;
-      if (Array.isArray(data.board)) board.push(...data.board);
-      active = data.active || null;
-    },
+    fillBoard,
+    accept,
+    cancel,
+    update,
+    targetInfo,
+    setBeacon,
+    hideBeacon,
+    surgeNow,
+    setFareMult(n) { fareMult = n; },
+    setVipBoost(on) { vipBoost = on; },
   };
 }

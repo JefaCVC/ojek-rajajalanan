@@ -1,238 +1,200 @@
-// The city's other road users. Traffic drives along the roads, stops at red
-// lights, queues behind the vehicle ahead (rush hour makes real jams), and turns
-// at intersections. Pedestrians walk the sidewalks toward destinations, wait at
-// crossings, gather around warung carts, and wave when they are waiting for a ride.
+// OJEK! King of the Streets — traffic: cars, angkot, bajaj and trucks driving the
+// road grid, stopping at red lights, bunching into jams, plus parked bikes
+// and cars the player can borrow. Every vehicle follows a road line and
+// turns at intersections; nothing pathfinds off-road.
 
-import { WORLD, TRAFFIC } from './config.js';
-import { ROAD_HALF } from './city.js';
-import { randomInt, randomPick } from './random.js';
+import * as THREE from 'three';
+import { CITY } from './config.js';
+import { buildBike, buildCar } from './vehicles.js';
+import { worldRandom as rng } from './random.js';
 
-const CAR_COLORS = ['#c9c2b4', '#8a9ab0', '#b04a4a', '#4a8a6b', '#d9c94a', '#6b6b7a', '#a08a6b'];
-const PED_COLORS = ['#d94f3d', '#3a7bd5', '#2e9e6b', '#d9a441', '#8a5ab0', '#e87ab0', '#4a9a9a', '#c97a3a'];
+const CAR_COLORS = [0xc23b3b, 0x2e6db0, 0xe8e8e8, 0x2a2a2a, 0xd4a017, 0x8e44ad, 0x4a90a4, 0xe67e22];
+const TRAFFIC_TYPES = ['sedan', 'sedan', 'sedan', 'angkot', 'bajaj', 'truck'];
 
-export function createTraffic(city, random) {
-  const cars = [];
-  const pedestrians = [];
+function randomRoad(r) {
+  const vertical = r.chance(0.5);
+  const i = r.int(0, CITY.blocksX);
+  return { vertical, line: CITY.roadLine(i), dir: r.chance(0.5) ? 1 : -1 };
+}
 
-  function spawnCar() {
-    const vertical = random() < 0.5;
-    const road = vertical ? randomPick(random, city.roadsX) : randomPick(random, city.roadsY);
-    const dir = random() < 0.5 ? 1 : -1;
-    const kind = randomPick(random, ['car', 'car', 'car', 'angkot', 'bajaj', 'bike']);
-    const speed = kind === 'bajaj' ? 120 : kind === 'angkot' ? 150 : kind === 'bike' ? 220 : 170 + random() * 60;
-    return {
-      kind,
-      x: vertical ? road + dir * 18 : (dir > 0 ? -60 : WORLD.width + 60),
-      y: vertical ? (dir > 0 ? -60 : WORLD.height + 60) : road + dir * 18,
-      vertical,
-      dir,
-      speed,
-      maxSpeed: speed,
-      color: kind === 'angkot' ? '#2e9e6b' : kind === 'bajaj' ? '#e87a2e' : randomPick(random, CAR_COLORS),
-      stopped: false,
-      waitTimer: 0,
+export function createTraffic(scene, city) {
+  const vehicles = [];
+  const parked = [];
+  const half = CITY.size / 2;
+
+  function spawnVehicle(at) {
+    const type = rng.pick(TRAFFIC_TYPES);
+    const built = buildCar(rng.pick(CAR_COLORS), type);
+    scene.add(built.group);
+    const road = at || randomRoad(rng);
+    const v = {
+      built,
+      type,
+      vertical: road.vertical,
+      line: road.line,
+      dir: road.dir,
+      along: road.along ?? rng.range(-half + 30, half - 30),
+      speed: 0,
+      cruise: type === 'truck' ? rng.range(7, 9) : type === 'bajaj' ? rng.range(8, 11) : rng.range(10, 14),
+      length: type === 'truck' ? 6.4 : type === 'angkot' ? 3.6 : 4.2,
+      width: type === 'truck' ? 2.1 : 1.8,
+      wait: 0,
     };
+    vehicles.push(v);
+    return v;
   }
 
-  /** A point on the sidewalk of one road, at a position along it. */
-  function sidewalkPoint(road, along) {
-    if (road.vertical) return { x: road.at + road.side * (ROAD_HALF + 12), y: along };
-    return { x: along, y: road.at + road.side * (ROAD_HALF + 12) };
+  function vehiclePos(v) {
+    return v.vertical
+      ? { x: v.line + v.dir * 3.2, z: v.along }
+      : { x: v.along, z: v.line + v.dir * 3.2 };
   }
 
-  function randomRoad() {
-    const vertical = random() < 0.5;
-    return {
-      vertical,
-      at: vertical ? randomPick(random, city.roadsX) : randomPick(random, city.roadsY),
-      side: random() < 0.5 ? -1 : 1,
-    };
+  function headingOf(v) {
+    if (v.vertical) return v.dir > 0 ? 0 : Math.PI;
+    return v.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
   }
 
-  function spawnPedestrian() {
-    // Pedestrians stroll along one road's sidewalk, like real people: they
-    // never cut across blocks or wander through traffic.
-    const road = randomRoad();
-    const span = road.vertical ? WORLD.height : WORLD.width;
-    const start = sidewalkPoint(road, 120 + random() * (span - 240));
-    const target = sidewalkPoint(road, 120 + random() * (span - 240));
-    return {
-      x: start.x, y: start.y,
-      targetX: target.x, targetY: target.y,
-      road,
-      speed: 45 + random() * 35,
-      color: randomPick(random, PED_COLORS),
-      waving: false,
-      waitTimer: 0,
-      phase: random() * Math.PI * 2,
-    };
-  }
-
-  for (let i = 0; i < TRAFFIC.carCount; i += 1) {
-    const car = spawnCar();
-    // Scatter the starting cars across the city instead of at the edges.
-    if (car.vertical) car.y = random() * WORLD.height;
-    else car.x = random() * WORLD.width;
-    cars.push(car);
-  }
-  for (let i = 0; i < TRAFFIC.pedestrianCount; i += 1) pedestrians.push(spawnPedestrian());
-
-  // A few pedestrians gather around warung carts and the market.
-  for (let i = 0; i < 8; i += 1) {
-    const cart = randomPick(random, city.carts);
-    const ped = spawnPedestrian();
-    ped.x = cart.x + (random() - 0.5) * 50;
-    ped.y = cart.y + (random() - 0.5) * 50;
-    ped.targetX = ped.x;
-    ped.targetY = ped.y;
-    ped.waitTimer = 20 + random() * 40;
-    pedestrians.push(ped);
-  }
-
-  function lightBlocks(car) {
-    const light = city.lightAt(car.x + (car.vertical ? 0 : car.dir * 60), car.y + (car.vertical ? car.dir * 60 : 0));
-    if (!light) return false;
-    // A green light lets the matching direction through; red stops it.
-    const greenForMe = light.verticalGreen === car.vertical;
-    return !greenForMe && light.state !== 'yellow';
-  }
-
-  function vehicleAhead(car) {
-    for (const other of cars) {
-      if (other === car || other.vertical !== car.vertical || other.dir !== car.dir) continue;
-      const dx = other.x - car.x;
-      const dy = other.y - car.y;
-      const along = car.vertical ? dy * car.dir : dx * car.dir;
-      const across = car.vertical ? Math.abs(dx) : Math.abs(dy);
-      if (along > 0 && along < 70 && across < 24) return true;
+  function placeParked() {
+    const spots = [];
+    for (let i = 0; i < 14; i += 1) {
+      const vertical = rng.chance(0.5);
+      const line = CITY.roadLine(rng.int(1, CITY.blocksX - 1));
+      const along = rng.range(-half + 40, half - 40);
+      const isBike = rng.chance(0.6);
+      const built = isBike
+        ? buildBike(rng.pick(CAR_COLORS), 0.35)
+        : buildCar(rng.pick(CAR_COLORS), 'sedan');
+      const x = vertical ? line + 5.6 : along;
+      const z = vertical ? along : line + 5.6;
+      const heading = vertical ? (rng.chance(0.5) ? 0 : Math.PI) : (rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2);
+      built.group.position.set(x, 0, z);
+      built.group.rotation.y = heading;
+      scene.add(built.group);
+      spots.push({ built, isBike, x, z, heading, taken: false });
     }
-    return false;
+    parked.push(...spots);
+  }
+
+  placeParked();
+  for (let i = 0; i < 26; i += 1) spawnVehicle();
+
+  function nextIntersection(v) {
+    // Index of the intersection ahead on this vehicle's road.
+    const ahead = v.along + v.dir * 10;
+    const idx = Math.round((ahead + half - CITY.road / 2) / CITY.pitch);
+    return THREE.MathUtils.clamp(idx, 0, CITY.blocksX);
+  }
+
+  function update(dt, time, density) {
+    const targetCount = Math.round(26 * density);
+    while (vehicles.length < targetCount) spawnVehicle();
+    for (let i = vehicles.length - 1; i >= 0; i -= 1) {
+      const v = vehicles[i];
+      const pos = vehiclePos(v);
+      // Traffic light: stop if the next intersection shows red for our axis.
+      let wantSpeed = v.cruise;
+      const ni = nextIntersection(v);
+      const distToLight = Math.abs(CITY.roadLine(ni) - v.along);
+      if (distToLight < 16 && distToLight > 0) {
+        const ix = v.vertical ? Math.round((v.line + half - CITY.road / 2) / CITY.pitch) : ni;
+        const iz = v.vertical ? ni : Math.round((v.line + half - CITY.road / 2) / CITY.pitch);
+        const state = city.lightState(ix, iz, time);
+        if (state) {
+          const greenForUs = v.vertical ? state.startsWith('ns') : state.startsWith('ew');
+          if (!greenForUs) wantSpeed = 0;
+        }
+      }
+      // Car ahead on the same lane: slow down, never overlap.
+      for (const o of vehicles) {
+        if (o === v || o.vertical !== v.vertical || o.line !== v.line || o.dir !== v.dir) continue;
+        const gap = (o.along - v.along) * v.dir;
+        if (gap > 0 && gap < 11) wantSpeed = Math.min(wantSpeed, Math.max(0, (gap - 6) * 1.2));
+      }
+      v.speed += (wantSpeed - v.speed) * Math.min(1, dt * 1.8);
+      v.along += v.speed * v.dir * dt;
+      // At the city edge, or sometimes at an intersection, re-route.
+      const edge = half - 12;
+      if (Math.abs(v.along) > edge) {
+        const road = randomRoad(rng);
+        v.vertical = road.vertical;
+        v.line = road.line;
+        v.dir = road.dir;
+        v.along = -road.dir * (half - 20);
+      } else if (v.speed > 1) {
+        const idx = Math.round((v.along + half - CITY.road / 2) / CITY.pitch);
+        const linePos = CITY.roadLine(idx);
+        if (Math.abs(v.along - linePos) < v.speed * dt + 0.4 && rng.chance(0.12)) {
+          // Turn onto the crossing road.
+          const oldLine = v.line;
+          v.vertical = !v.vertical;
+          v.line = linePos;
+          v.along = oldLine;
+          v.dir = rng.chance(0.5) ? 1 : -1;
+        }
+      }
+      const p = vehiclePos(v);
+      v.built.group.position.set(p.x, 0, p.z);
+      const targetHeading = headingOf(v);
+      let dh = targetHeading - v.built.group.rotation.y;
+      while (dh > Math.PI) dh -= Math.PI * 2;
+      while (dh < -Math.PI) dh += Math.PI * 2;
+      v.built.group.rotation.y += dh * Math.min(1, dt * 4);
+      for (const w of v.built.wheels) w.rotation.x += (v.speed / 0.38) * dt;
+    }
+    for (const p of parked) {
+      if (p.taken) continue;
+      // Parked bikes idle upright; nothing moves them.
+    }
+  }
+
+  function nearestParked(x, z, radius) {
+    let best = null;
+    let bestD = radius;
+    for (const p of parked) {
+      if (p.taken) continue;
+      const d = Math.hypot(p.x - x, p.z - z);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
+  }
+
+  function takeParked(p) {
+    p.taken = true;
+    scene.remove(p.built.group);
+    return p;
+  }
+
+  function returnParked(p, x, z, heading) {
+    p.taken = false;
+    p.x = x;
+    p.z = z;
+    p.heading = heading;
+    p.built.group.position.set(x, 0, z);
+    p.built.group.rotation.y = heading;
+    scene.add(p.built.group);
+  }
+
+  function nearestTraffic(x, z, radius) {
+    let best = null;
+    let bestD = radius;
+    for (const v of vehicles) {
+      const p = vehiclePos(v);
+      const d = Math.hypot(p.x - x, p.z - z);
+      if (d < bestD) { bestD = d; best = { v, pos: p, dist: d }; }
+    }
+    return best;
   }
 
   return {
-    cars,
-    pedestrians,
-    /** The count of cars currently stopped, a quick read on how jammed the city is. */
-    get stoppedCount() { return cars.filter((c) => c.stopped).length; },
-
-    update(dt, trafficMultiplier, closures) {
-      // Traffic lights cycle: green, then yellow, then the other direction.
-      for (const light of city.lights) {
-        light.timer -= dt;
-        if (light.timer <= 0) {
-          if (light.state === 'green') { light.state = 'yellow'; light.timer = 2; }
-          else if (light.state === 'yellow') {
-            light.state = 'green';
-            light.verticalGreen = !light.verticalGreen;
-            light.timer = TRAFFIC.lightCycle * (0.7 + random() * 0.6);
-          }
-        }
-      }
-
-      const targetCars = Math.round(TRAFFIC.carCount * trafficMultiplier);
-      while (cars.length < targetCars) cars.push(spawnCar());
-      while (cars.length > targetCars + 2) cars.pop();
-
-      for (const car of cars) {
-        const blockedByLight = lightBlocks(car);
-        const blockedByCar = vehicleAhead(car);
-        const aheadX = car.x + (car.vertical ? 0 : car.dir * 70);
-        const aheadY = car.y + (car.vertical ? car.dir * 70 : 0);
-        const blockedByClosure = city.closureAt(aheadX, aheadY) !== null;
-        car.stopped = blockedByLight || blockedByCar || blockedByClosure;
-        if (car.stopped) {
-          car.waitTimer += dt;
-          car.speed = Math.max(0, car.speed - 400 * dt);
-        } else {
-          car.waitTimer = 0;
-          car.speed = Math.min(car.maxSpeed, car.speed + 120 * dt);
-        }
-        if (car.vertical) car.y += car.dir * car.speed * dt;
-        else car.x += car.dir * car.speed * dt;
-
-        // At an intersection, sometimes turn onto the crossing road.
-        const onV = city.roadsX.some((rx) => Math.abs(car.x - rx) < 4);
-        const onH = city.roadsY.some((ry) => Math.abs(car.y - ry) < 4);
-        if (onV && onH && random() < 0.004) {
-          car.vertical = !car.vertical;
-          car.dir = random() < 0.5 ? 1 : -1;
-          if (car.vertical) car.x = city.roadsX.reduce((a, b) => Math.abs(b - car.x) < Math.abs(a - car.x) ? b : a) + car.dir * 18;
-          else car.y = city.roadsY.reduce((a, b) => Math.abs(b - car.y) < Math.abs(a - car.y) ? b : a) + car.dir * 18;
-        }
-
-        if (car.x < -80 || car.x > WORLD.width + 80 || car.y < -80 || car.y > WORLD.height + 80) {
-          Object.assign(car, spawnCar());
-        }
-      }
-
-      for (const ped of pedestrians) {
-        if (ped.waitTimer > 0) {
-          ped.waitTimer -= dt;
-          continue;
-        }
-        const dx = ped.targetX - ped.x;
-        const dy = ped.targetY - ped.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 12) {
-          // Pick the next stroll on the same road, or turn onto a crossing
-          // road: first walk to the intersection, then along the new road.
-          if (ped.road && random() < 0.25) {
-            const crossing = ped.road.vertical
-              ? { vertical: false, at: city.roadsY.reduce((a, b) => Math.abs(b - ped.y) < Math.abs(a - ped.y) ? b : a), side: ped.road.side }
-              : { vertical: true, at: city.roadsX.reduce((a, b) => Math.abs(b - ped.x) < Math.abs(a - ped.x) ? b : a), side: ped.road.side };
-            const corner = ped.road.vertical
-              ? { x: ped.road.at + ped.road.side * (ROAD_HALF + 12), y: crossing.at + crossing.side * (ROAD_HALF + 12) }
-              : { x: crossing.at + crossing.side * (ROAD_HALF + 12), y: ped.road.at + ped.road.side * (ROAD_HALF + 12) };
-            const span = crossing.vertical ? WORLD.height : WORLD.width;
-            const next = sidewalkPoint(crossing, 120 + random() * (span - 240));
-            ped.waypoint = corner;
-            ped.road = crossing;
-            ped.targetX = next.x;
-            ped.targetY = next.y;
-          } else if (ped.road) {
-            const span = ped.road.vertical ? WORLD.height : WORLD.width;
-            const next = sidewalkPoint(ped.road, 120 + random() * (span - 240));
-            ped.targetX = next.x;
-            ped.targetY = next.y;
-          } else {
-            const next = city.randomRoadsidePoint();
-            ped.targetX = next.x;
-            ped.targetY = next.y;
-          }
-          if (random() < 0.2) ped.waitTimer = 3 + random() * 8;
-          continue;
-        }
-        // A waypoint (a corner turn) comes before the target.
-        const gx = ped.waypoint ? ped.waypoint.x : ped.targetX;
-        const gy = ped.waypoint ? ped.waypoint.y : ped.targetY;
-        const gdx = gx - ped.x;
-        const gdy = gy - ped.y;
-        const gdist = Math.sqrt(gdx * gdx + gdy * gdy);
-        if (ped.waypoint && gdist < 12) ped.waypoint = null;
-        else if (gdist > 0.1) {
-          ped.x += (gdx / gdist) * ped.speed * dt;
-          ped.y += (gdy / gdist) * ped.speed * dt;
-        }
-        ped.phase += dt * 6;
-        const corrected = city.collideCircle(ped.x, ped.y, 8, false);
-        ped.x = corrected.x;
-        ped.y = corrected.y;
-      }
-    },
-
-    /** Marks a few roadside pedestrians as waiting passengers who wave. */
-    setWaving(count) {
-      let waved = 0;
-      for (const ped of pedestrians) {
-        ped.waving = false;
-      }
-      const shuffled = [...pedestrians].sort(() => random() - 0.5);
-      for (const ped of shuffled) {
-        if (waved >= count) break;
-        if (city.isOnRoad(ped.x, ped.y)) continue;
-        ped.waving = true;
-        waved += 1;
-      }
-    },
+    update,
+    vehicles,
+    parked,
+    vehiclePos,
+    nearestParked,
+    takeParked,
+    returnParked,
+    nearestTraffic,
+    spawnVehicle,
   };
 }

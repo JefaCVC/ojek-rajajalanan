@@ -1,35 +1,62 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OJEK! Raja Jalanan</title>
-<style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: #171410;
-    height: 100%;
-    overflow: hidden;
-  }
-  #wrap {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-  }
-  canvas {
-    background: #8a9a5b;
-    image-rendering: auto;
-    max-width: 100vw;
-    max-height: 100vh;
-  }
-</style>
+<title>OJEK! King of the Streets</title>
+<link rel="stylesheet" href="src/style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
 </head>
 <body>
-<div id="wrap">
-  <canvas id="game" width="1280" height="720"></canvas>
+<div id="scene"></div>
+<div id="float-layer"></div>
+<div id="speed-lines"></div>
+
+<div id="hud">
+  <div id="hud-topleft" class="hud-panel">
+    <div id="hud-money" class="money">Rp 50.000</div>
+    <div id="hud-rating" class="rating">★★★★☆ 4.2</div>
+    <div id="hud-streak" class="streak">Streak -</div>
+    <div id="hud-rank" class="rank">Rookie Rider</div>
+    <div class="xp-track"><div id="hud-xpbar" class="xp-fill"></div></div>
+    <div id="hud-xptext" class="xp-text">0/150 XP</div>
+  </div>
+
+  <div id="hud-topright" class="hud-panel">
+    <div id="hud-clock" class="clock">08:00</div>
+    <div id="hud-shift" class="shift">Morning</div>
+    <div id="hud-weather" class="weather">Clear</div>
+    <div id="hud-wanted" class="wanted"></div>
+  </div>
+
+  <div id="hud-objective" class="hud-panel objective" style="display:none"></div>
+
+  <div id="hud-bust" class="hud-panel bust" style="display:none">
+    <div class="bust-label">Police closing in! Run now!</div>
+    <div class="bust-track"><div id="hud-bustbar" class="bust-fill"></div></div>
+  </div>
+
+  <div id="hud-bottomleft" class="hud-panel gauges">
+    <div id="hud-speed" class="speed">0 km/h</div>
+    <div class="gauge-row"><span id="hud-fuel">Fuel 80%</span><div class="bar-track"><div id="hud-fuelbar" class="bar-fill"></div></div></div>
+    <div class="gauge-row"><span id="hud-cond">Condition 100%</span><div class="bar-track"><div id="hud-condbar" class="bar-fill"></div></div></div>
+    <div class="gauge-row"><span id="hud-hp">Health 100</span><div class="bar-track"><div id="hud-hpbar" class="bar-fill"></div></div></div>
+    <div id="hud-radio" class="radio">Dangdut 88 (R switch)</div>
+    <div id="hud-hint" class="hint"></div>
+  </div>
+
+  <canvas id="minimap" width="220" height="220"></canvas>
 </div>
+
+<div id="skill-buttons"></div>
+
+<div id="banner" style="display:none"></div>
+<div id="toasts"></div>
+<div id="dialog" style="display:none"></div>
+<div id="menus" style="display:none"></div>
+
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

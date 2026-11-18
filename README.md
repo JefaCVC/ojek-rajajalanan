@@ -1,43 +1,72 @@
-# OJEK! Raja Jalanan
+[![best-game-01](https://make.fun/badge/best-game-01.svg)](https://make.fun/c/best-game-01)
+[![rank](https://make.fun/badge/best-game-01/JefaCVC/ojek-rajajalanan/rank.svg)](https://make.fun/c/best-game-01)
+[![reward](https://make.fun/badge/best-game-01/JefaCVC/ojek-rajajalanan/reward.svg)](https://make.fun/c/best-game-01)
 
-[![Make GTA 6](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
-[![Rank](https://make.fun/badge/gta6-01/jefaprayoga-stack/ojek-rajajalanan/rank.svg)](https://make.fun/bounty/gta6-01)
-[![Reward](https://make.fun/badge/gta6-01/jefaprayoga-stack/ojek-rajajalanan/reward.svg)](https://make.fun/bounty/gta6-01)
+# OJEK! King of the Streets
 
-An open-world motorbike taxi game set in a living Indonesian city. Entry for the
-[Make GTA 6 bounty on make.fun](https://make.fun/bounty/gta6-01).
+A 3D open-world game: ride as an ojek (motorbike taxi) driver in a living
+Indonesian city. Pick up passengers, deliver parcels and hot food, fight the
+Geng Macan gang, dodge the police, and climb from Rookie Rider to King of
+the Streets. Built with Three.js, no build step, no network. An entry for
+[make.fun best-game-01](https://make.fun/c/best-game-01).
 
-You are an ojek driver in Kota Sinar, a sun-soaked city of markets, mosques,
-schools, and traffic jams. Pick your orders from the order board, ride across
-town, earn fares and tips, level up, and trade your rattling old bike for better
-machines at the dealer. Watch the traffic lights, or the police will watch you.
+## Play
+
+```sh
+node serve.ts
+```
+
+Then open http://localhost:8080 in desktop Chrome.
+
+## Controls
+
+| Key | Action |
+| --- | --- |
+| WASD | Walk, throttle, brake, steer |
+| E | Mount/dismount bike, interact (dealer, garage, gas station) |
+| Q | Phone (orders, skills, garage, stats, map, radio) |
+| 1 / Shift | Nitro Boost (skill) |
+| 2 | Quick Fix (skill) |
+| 3 | Lay Low (skill) |
+| F | Punch (on foot) |
+| Space | Dodge (on foot) |
+| H | Horn |
+| R | Switch radio station |
+| M | Mute sound |
+| Esc | Pause |
+| Drag mouse | Orbit camera |
+| F3 | Debug panel |
 
 ## What is in the game
 
-- A city to explore on foot and by bike, with traffic, pedestrians, shops,
-  a market, a mosque, a school, a gas station, and a bike dealer
-- An order board: every order shows its distance and fare, and you choose
-  which one to take
-- Five bikes, from a shaky old bebek to a 250cc sport bike, each with its
-  own speed, acceleration, and handling
-- A wanted system with police who chase you, plus fines and bribes
-- Parked bikes and cars you can take, at the risk of a wanted star
-- Rival ojek gangs and muggers, and a short story across five missions
-- Fuel, tips, ratings, levels, and a save that keeps your progress
+- A 3D city with five districts (downtown, market, kampung, port,
+  riverside) with a river and bridges, a mosque, a school, gas stations,
+  a dealer, a garage, a park, traffic, pedestrians, and a day/night cycle.
+- Free-choice orders: passengers, parcels, timed food delivery, VIP rides,
+  rush parcels. The price shows before you take the job; fares rise at
+  rush hour and in the rain.
+- Economy: money, fuel, service, 7 bikes at the dealer, engine/tire/brake
+  upgrades, bike paint, a garage.
+- Star rating and a streak multiplier up to x2.0; 6 ranks unlock districts,
+  order tiers, and new bikes.
+- A skill tree with 3 branches (Rider, Hustler, Survivor), 3 tiers each.
+  Points come from rank-ups and story missions. Active skills with
+  cooldowns: Nitro Boost, Quick Fix, Lay Low.
+- Daily challenges with money and XP rewards, an earnings log, and a
+  full-city map on the phone.
+- 5 wanted tiers: police cars chase, roadblocks at tier 3, a helicopter
+  at tier 5.
+- A 7-mission Geng Macan story arc: races, thief chases, guarding a food
+  stall, a final duel.
+- Light combat: punch, dodge, night muggers.
+- Weather (clear, cloudy, rain), random road events (flood, protest,
+  crash), procedural radio, achievements, a tutorial, a codex, autosave.
 
-## How to play
+## Screenshots
 
-Serve the game folder with any static server, or run `node serve.ts` and open
-http://localhost:8080. No network connection is needed.
-
-- WASD or arrow keys: move and drive
-- E: get on or off a bike, pick up a passenger, enter the dealer
-- Q: order board
-- F: shove or punch (on foot or on the bike)
-- H: horn
-- Esc: pause
-- N: sound on or off
+Four screenshots in `screenshots/`, taken from the running game in headless
+Chromium (see `shots.json` for each scene).
 
 ## License
 
-MIT. See LICENSE.
+MIT. Three.js (MIT) is used as `*.min.js` builds in `game/vendor/three/`.

@@ -1,133 +1,123 @@
-// Debug hooks, built in from day one (guizang method, written here in my own
-// code): frame stepping, key simulation, URL flags, and an F3 panel. Conclusions
-// come from numbers, screenshots only as backup.
-//
-// window.G.step(n)   — advance n frames, with rendering
-// window.G.upd(n)    — advance n logic steps, no rendering (fast scans)
-// window.G.press(...)— simulate key presses through the real input path
-// window.G.state()   — the current state snapshot as plain numbers
-// ?stage=dealer|chase|foot|cover — jump straight to a staged scene
-// ?auto — skip the title screen into the game
-// ?god  — invulnerable, full fuel, no wanted decay needed
-// ?seed=N — fix the city seed
-// F3 — toggle the debug panel (position, speed, fps, held keys, state)
+// OJEK! King of the Streets — debug hooks for play-testing: G.step advances the
+// simulation frame by frame, G.press sends keys, G.state snapshots the
+// game, ?god makes the player invulnerable with endless fuel, ?muted
+// silences audio, and F3 shows a live panel. All in the game's own words.
 
-import { STEP } from './config.js';
-
-export function parseFlags() {
+export function createDebug(game) {
   const params = new URLSearchParams(window.location.search);
-  return {
-    stage: params.get('stage') || null,
-    auto: params.has('auto'),
-    god: params.has('god'),
-    seed: params.has('seed') ? parseInt(params.get('seed'), 10) || 0 : null,
-    shot: params.get('shot') || null,
-    muted: params.has('muted'),
-  };
-}
+  const god = params.has('god');
+  const muted = params.has('muted');
+  const auto = params.has('auto');
+  let stepping = false;
+  let stepsLeft = 0;
+  let panel = null;
 
-export function createDebug(game, input) {
-  let panelVisible = false;
-  let fps = 0;
-  let frameCount = 0;
-  let fpsTimer = 0;
+  function snapshot() {
+    const p = game.profile;
+    return {
+      mode: game.getMode ? game.getMode() : '?',
+      money: p.money,
+      xp: p.xp,
+      rating: Number(p.rating.toFixed(2)),
+      streak: p.streak,
+      wanted: game.police.wanted,
+      hour: Number(game.daycycle.hour.toFixed(2)),
+      weather: game.daycycle.weather,
+      riding: game.player.riding,
+      speedKmh: Math.round(game.player.speedKmh),
+      fuel: Math.round(game.player.fuel()),
+      condition: Math.round(game.player.condition()),
+      hp: Math.round(game.player.hp),
+      pos: { x: Math.round(game.player.pos.x), z: Math.round(game.player.pos.z) },
+      heading: Number(game.player.heading.toFixed(2)),
+      activeOrder: game.orders.active ? game.orders.active.id : null,
+      boardSize: game.orders.board.length,
+      storyIndex: p.storyIndex,
+      storyActive: !!game.story.active,
+      enemies: game.combat.enemies.length,
+      policeCars: game.police.cars.length,
+      skillPoints: p.skillPoints || 0,
+      skills: { ...p.skills },
+      skillCd: game.skillCd ? { ...game.skillCd } : null,
+      nitroActive: !!game.player.nitroActive,
+      maxHp: game.player.maxHp,
+      topSpeed: Math.round(game.player.effectiveSpec().topSpeed),
+    };
+  }
 
-  window.addEventListener('keydown', (event) => {
-    if (event.code === 'F3') {
-      event.preventDefault();
-      panelVisible = !panelVisible;
+  function togglePanel() {
+    if (panel) {
+      panel.remove();
+      panel = null;
+      return;
+    }
+    panel = document.createElement('div');
+    panel.id = 'debug-panel';
+    panel.style.cssText = 'position:fixed;left:8px;top:8px;z-index:200;background:rgba(0,0,0,0.8);color:#7dffb0;font:12px monospace;padding:8px 10px;border-radius:8px;white-space:pre;pointer-events:none;';
+    document.body.appendChild(panel);
+  }
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'F3') {
+      e.preventDefault();
+      togglePanel();
     }
   });
 
-  const api = {
-    step(n, dt) {
-      const frames = n === undefined ? 60 : n;
-      const stepDt = dt === undefined ? STEP : dt;
-      for (let i = 0; i < frames; i += 1) game.stepFrame(stepDt);
-      return api.state();
+  window.G = {
+    step(n = 1) {
+      stepping = true;
+      stepsLeft = n;
     },
-    upd(n, dt) {
-      const steps = n === undefined ? 30 : n;
-      const stepDt = dt === undefined ? STEP : dt;
-      for (let i = 0; i < steps; i += 1) game.updateOnly(stepDt);
-      return api.state();
+    resume() {
+      stepping = false;
+      stepsLeft = 0;
     },
-    press(...codes) {
-      for (const code of codes) input.simulatePress(code);
-      return input.heldCodes;
-    },
-    release(...codes) {
-      for (const code of codes) input.simulateRelease(code);
-      return input.heldCodes;
-    },
-    state() { return game.snapshot(); },
-    /** Spawns a rival or begal near the player, for combat verification. */
-    spawn(kind) {
-      const angle = Math.random() * Math.PI * 2;
-      const x = game.player.x + Math.cos(angle) * 120;
-      const y = game.player.y + Math.sin(angle) * 120;
-      if (kind === 'begal') game.combat.spawnBegal(x, y);
-      else game.combat.spawnRival(x, y);
-      return game.combat.count;
-    },
-    /** Puts the player at a world position (scripted-scene override). */
-    teleport(x, y) {
-      game.player.setPosition(x, y);
-      return api.state();
-    },
-    /** Gives the player money (scripted-scene override). */
-    giveMoney(amount) {
-      game.player.addMoney(amount);
-      return game.player.money;
-    },
-    /** Adds wanted stars (scripted-scene override). */
-    addWanted(amount) {
-      game.police.addWanted(amount);
-      return game.police.wanted;
-    },
-    get panelVisible() { return panelVisible; },
-    togglePanel() { panelVisible = !panelVisible; },
-  };
-  window.G = api;
-
-  return {
-    api,
-    get panelVisible() { return panelVisible; },
-    /** Call once per rendered frame with the real delta to track fps. */
-    tick(dt) {
-      frameCount += 1;
-      fpsTimer += dt;
-      if (fpsTimer >= 0.5) {
-        fps = Math.round(frameCount / fpsTimer);
-        frameCount = 0;
-        fpsTimer = 0;
+    press(codes) {
+      for (const code of codes) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { code }));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code }));
       }
     },
-    draw(ctx, width) {
-      if (!panelVisible) return;
-      const state = game.snapshot();
-      const lines = [
-        'DEBUG — F3 tutup',
-        `fps ${fps}  tick ${state.tick}`,
-        `pos ${Math.round(state.player.x)}, ${Math.round(state.player.y)}`,
-        `speed ${Math.round(state.player.speed)}  sudut ${Math.round(state.player.angle * 57.3)}`,
-        `motor ${state.player.onBike ? 'ya' : 'tidak'}  bensin ${Math.round(state.player.fuel)}`,
-        `uang ${state.player.money}  level ${state.player.level}  xp ${state.player.xp}/${state.player.xpNext}`,
-        `rating ${state.player.rating.toFixed(2)}  streak ${state.streak}  pangkat ${state.rank}`,
-        `wanted ${state.wanted}  polisi ${state.policeCars}  musuh ${state.enemies}`,
-        `order ${state.activeOrder ? state.activeOrder.id + ' ' + state.activeOrder.state : 'tidak ada'}`,
-        `shift ${state.shift}  jam ${state.clock}  cuaca ${state.weather}`,
-        `tombol: ${input.heldCodes.join(', ') || 'tidak ada'}`,
-      ];
-      ctx.save();
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-      ctx.fillRect(8, 8, 320, lines.length * 18 + 16);
-      ctx.font = '13px monospace';
-      ctx.fillStyle = '#7dff9a';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      lines.forEach((line, i) => ctx.fillText(line, 16, 16 + i * 18));
-      ctx.restore();
+    hold(code) {
+      window.dispatchEvent(new KeyboardEvent('keydown', { code }));
+    },
+    release(code) {
+      window.dispatchEvent(new KeyboardEvent('keyup', { code }));
+    },
+    state: snapshot,
+    setWanted(n) { game.police.setWanted(n); },
+    giveMoney(n) { game.profile.money += n; },
+    giveXp(n) { game.addXp(n); },
+    giveSkillPoints(n) { game.profile.skillPoints = (game.profile.skillPoints || 0) + n; },
+    teleport(x, z, heading) { game.player.teleport(x, z, heading); },
+    setHour(h) { game.daycycle.setHour(h); },
+    setWeather(w) { game.daycycle.setWeather(w); },
+    acceptFirstOrder() {
+      const first = game.orders.board[0];
+      if (first) game.acceptOrder(first.id);
+    },
+    completeOrder() {
+      const t = game.orders.targetInfo(game.player.pos);
+      if (t) game.player.teleport(t.target.x, t.target.z, 0);
+    },
+  };
+
+  return {
+    god,
+    muted,
+    auto,
+    get stepping() { return stepping; },
+    consumeStep() {
+      if (!stepping) return false;
+      if (stepsLeft <= 0) return false;
+      stepsLeft -= 1;
+      return true;
+    },
+    updatePanel(fps) {
+      if (!panel) return;
+      const s = snapshot();
+      panel.textContent = `fps ${fps}\n` + Object.entries(s).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
     },
   };
 }

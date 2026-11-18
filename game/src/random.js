@@ -1,23 +1,24 @@
-// A small seeded random generator (mulberry32), so the city, the orders, and the
-// screenshot scenes come out the same for the same seed.
+// OJEK! King of the Streets — seeded random numbers so a scene can be staged the
+// same way every time (screenshots, tests) while normal play stays varied.
 
 export function createRandom(seed) {
   let state = seed >>> 0;
-  return function random() {
-    state |= 0;
-    state = (state + 0x6d2b79f5) | 0;
-    let value = Math.imul(state ^ (state >>> 15), 1 | state);
-    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  if (state === 0) state = 0x9e3779b9;
+  const next = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  return {
+    next,
+    range(a, b) { return a + (b - a) * next(); },
+    int(a, b) { return Math.floor(a + (b - a + 1) * next()); },
+    pick(list) { return list[Math.floor(next() * list.length)]; },
+    chance(p) { return next() < p; },
+    sign() { return next() < 0.5 ? -1 : 1; },
   };
 }
 
-/** An integer from min to max, inclusive, from the given random function. */
-export function randomInt(random, min, max) {
-  return min + Math.floor(random() * (max - min + 1));
-}
-
-/** One item from an array, picked by the given random function. */
-export function randomPick(random, items) {
-  return items[Math.floor(random() * items.length)];
-}
+export const worldRandom = createRandom((Date.now() ^ 0x51ab) >>> 0);

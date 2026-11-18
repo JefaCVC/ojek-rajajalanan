@@ -1,105 +1,197 @@
-// The minimap: a small live map of Kota Sinar in the top-right corner. Roads,
-// district tint, the player arrow, the active order's pickup and destination,
-// police cars, closures, and landmarks. Everything is drawn from the same state
-// the game uses, so the map can never disagree with the world.
+// OJEK! King of the Streets — the minimap: a north-up canvas centred on the
+// player, showing roads, the river, the order target, police, the
+// helicopter, road events, landmarks and the parked bike. drawFull renders
+// the same view for the whole city on any canvas (the Map tab).
 
-import { WORLD, PALETTE } from './config.js';
+import { CITY, LANDMARKS } from './config.js';
 
-export const MINIMAP = { width: 200, height: 150 };
+export function createMinimap(canvas) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+  const RANGE = 130; // metres shown from centre to edge
 
-export function drawMinimap(ctx, x, y, game) {
-  const { width, height } = MINIMAP;
-  const sx = width / WORLD.width;
-  const sy = height / WORLD.height;
-  const city = game.city;
-
-  ctx.save();
-  ctx.fillStyle = 'rgba(20, 18, 16, 0.85)';
-  ctx.strokeStyle = PALETTE.panelEdge;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.roundRect(x, y, width, height, 8);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.roundRect(x + 2, y + 2, width - 4, height - 4, 6);
-  ctx.clip();
-
-  // District tint.
-  ctx.fillStyle = '#7d8f57';
-  ctx.fillRect(x, y, width, height);
-  ctx.fillStyle = 'rgba(217, 164, 65, 0.25)';
-  ctx.fillRect(x, y, 1200 * sx, 1950 * sy);
-  ctx.fillStyle = 'rgba(58, 123, 213, 0.22)';
-  ctx.fillRect(x + 1200 * sx, y, 1200 * sx, 1950 * sy);
-  ctx.fillStyle = 'rgba(46, 158, 107, 0.22)';
-  ctx.fillRect(x + 2400 * sx, y, 1200 * sx, 1950 * sy);
-  ctx.fillStyle = 'rgba(194, 46, 61, 0.22)';
-  ctx.fillRect(x, y + 1950 * sy, width, height - 1950 * sy);
-
-  // Roads.
-  ctx.strokeStyle = '#5d5a55';
-  ctx.lineWidth = 3;
-  for (const rx of city.roadsX) {
-    ctx.beginPath();
-    ctx.moveTo(x + rx * sx, y);
-    ctx.lineTo(x + rx * sx, y + height);
-    ctx.stroke();
+  function drawOn(c, w, h, state, opts = {}) {
+    const range = opts.range || RANGE;
+    const cx = opts.centerX ?? state.playerPos.x;
+    const cz = opts.centerZ ?? state.playerPos.z;
+    const { playerPos, heading, target, police, events, storyDest, ownBike, traffic, surgeZones } = state;
+    function toScreen(x, z) {
+      const s = w / (range * 2);
+      return [w / 2 + (x - cx) * s, h / 2 + (z - cz) * s];
+    }
+    c.clearRect(0, 0, w, h);
+    // Base: dark city ground.
+    c.fillStyle = '#1d2733';
+    c.fillRect(0, 0, w, h);
+    // Roads.
+    c.strokeStyle = '#4a5568';
+    c.lineWidth = Math.max(2, (CITY.road / (range * 2)) * w);
+    c.beginPath();
+    for (let i = 0; i <= CITY.blocksX; i += 1) {
+      const line = CITY.roadLine(i);
+      const [x0] = toScreen(line, 0);
+      const [, z0] = toScreen(0, line);
+      c.moveTo(x0, 0);
+      c.lineTo(x0, h);
+      c.moveTo(0, z0);
+      c.lineTo(w, z0);
+    }
+    c.stroke();
+    // River strip.
+    const rx0 = CITY.roadLine(9) + 12;
+    const rx1 = CITY.roadLine(10) - 12;
+    const [rxa] = toScreen(rx0, 0);
+    const [rxb] = toScreen(rx1, 0);
+    c.fillStyle = '#2e6da8';
+    c.fillRect(rxa, 0, rxb - rxa, h);
+    // Surge zones (Surge Sense only): pulsing gold rings where fares spike.
+    if (surgeZones) {
+      const pulse = 1 + Math.sin(Date.now() / 300) * 0.08;
+      for (const zn of surgeZones) {
+        const [x, y] = toScreen(zn.x, zn.z);
+        const r = (zn.r / (range * 2)) * w * pulse;
+        c.fillStyle = 'rgba(255, 210, 74, 0.14)';
+        c.beginPath();
+        c.arc(x, y, r, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = 'rgba(255, 210, 74, 0.8)';
+        c.lineWidth = 2;
+        c.stroke();
+      }
+    }
+    // Landmarks: dealer (D), garage (G), gas (S).
+    const marks = [
+      [LANDMARKS.dealer, '#ffd24a', 'D'],
+      [LANDMARKS.garage, '#9ad4e8', 'G'],
+      [LANDMARKS.gasA, '#ff8a5a', 'S'],
+      [LANDMARKS.gasB, '#ff8a5a', 'S'],
+    ];
+    c.font = 'bold 11px Arial, sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    for (const [lm, color, letter] of marks) {
+      const [x, y] = toScreen(lm.x, lm.z);
+      if (x < -10 || x > w + 10 || y < -10 || y > h + 10) continue;
+      c.fillStyle = color;
+      c.beginPath();
+      c.arc(x, y, 8, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#1d2733';
+      c.fillText(letter, x, y + 0.5);
+    }
+    // Road events.
+    for (const ev of events || []) {
+      const [x, y] = toScreen(ev.x, ev.z);
+      c.fillStyle = '#ff8a2a';
+      c.beginPath();
+      c.arc(x, y, 6, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = '#ffffff';
+      c.lineWidth = 1.5;
+      c.stroke();
+    }
+    // Traffic (faint dots).
+    if (traffic) {
+      c.fillStyle = 'rgba(200,200,200,0.5)';
+      for (const v of traffic.vehicles) {
+        const p = traffic.vehiclePos(v);
+        const [x, y] = toScreen(p.x, p.z);
+        if (x < 0 || x > w || y < 0 || y > h) continue;
+        c.fillRect(x - 1.5, y - 1.5, 3, 3);
+      }
+    }
+    // Police cars + helicopter.
+    if (police) {
+      for (const car of police.cars) {
+        const [x, y] = toScreen(car.pos.x, car.pos.z);
+        c.fillStyle = '#3a8aff';
+        c.beginPath();
+        c.arc(x, y, 5, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = '#ffffff';
+        c.lineWidth = 1;
+        c.stroke();
+      }
+      if (police.helicopter) {
+        const hp = police.helicopter.group.position;
+        const [x, y] = toScreen(hp.x, hp.z);
+        c.fillStyle = '#3a8aff';
+        c.beginPath();
+        c.arc(x, y, 7, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = '#ffffff';
+        c.lineWidth = 2;
+        c.stroke();
+      }
+    }
+    // Own parked bike.
+    if (ownBike) {
+      const [x, y] = toScreen(ownBike.x, ownBike.z);
+      c.fillStyle = '#2eff8a';
+      c.fillRect(x - 4, y - 4, 8, 8);
+    }
+    // Order target + story destination.
+    const pulse = 6 + Math.sin(Date.now() / 250) * 1.5;
+    if (target) {
+      const [x, y] = toScreen(target.x, target.z);
+      const clampedX = Math.max(10, Math.min(w - 10, x));
+      const clampedY = Math.max(10, Math.min(h - 10, y));
+      c.fillStyle = '#2eff8a';
+      c.beginPath();
+      c.arc(clampedX, clampedY, pulse, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = '#ffffff';
+      c.lineWidth = 2;
+      c.stroke();
+    }
+    if (storyDest) {
+      const [x, y] = toScreen(storyDest.x, storyDest.z);
+      const clampedX = Math.max(10, Math.min(w - 10, x));
+      const clampedY = Math.max(10, Math.min(h - 10, y));
+      c.fillStyle = '#ff5a5a';
+      c.beginPath();
+      c.arc(clampedX, clampedY, pulse, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = '#ffffff';
+      c.lineWidth = 2;
+      c.stroke();
+    }
+    // Player arrow, rotated by heading.
+    const [px, py] = toScreen(playerPos.x, playerPos.z);
+    c.save();
+    c.translate(px, py);
+    c.rotate(heading);
+    c.fillStyle = '#ffffff';
+    c.strokeStyle = '#1d2733';
+    c.lineWidth = 2;
+    c.beginPath();
+    c.moveTo(0, -9);
+    c.lineTo(6, 7);
+    c.lineTo(-6, 7);
+    c.closePath();
+    c.fill();
+    c.stroke();
+    c.restore();
+    // Border ring.
+    c.strokeStyle = 'rgba(255,255,255,0.35)';
+    c.lineWidth = 2;
+    c.strokeRect(1, 1, w - 2, h - 2);
   }
-  for (const ry of city.roadsY) {
-    ctx.beginPath();
-    ctx.moveTo(x, y + ry * sy);
-    ctx.lineTo(x + width, y + ry * sy);
-    ctx.stroke();
+
+  function draw(state) {
+    drawOn(ctx, W, H, state);
   }
 
-  // Closures, in red.
-  for (const c of city.closures) {
-    ctx.fillStyle = 'rgba(255, 71, 87, 0.8)';
-    ctx.fillRect(x + c.x * sx, y + c.y * sy, Math.max(4, c.w * sx), Math.max(4, c.h * sy));
+  // Whole-city map on any canvas (the Map tab in the phone menu).
+  function drawFull(targetCanvas, state) {
+    const c = targetCanvas.getContext('2d');
+    drawOn(c, targetCanvas.width, targetCanvas.height, state, {
+      range: CITY.size / 2 + 20,
+      centerX: 0,
+      centerZ: 0,
+    });
   }
 
-  // Landmarks.
-  ctx.fillStyle = PALETTE.gold;
-  for (const landmark of Object.values(city.landmarks)) {
-    ctx.beginPath();
-    ctx.arc(x + landmark.x * sx, y + landmark.y * sy, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Police cars, blue.
-  ctx.fillStyle = PALETTE.blue;
-  for (const car of game.police.cars) {
-    ctx.beginPath();
-    ctx.arc(x + car.x * sx, y + car.y * sy, 3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // The active order: green pickup, gold destination.
-  const order = game.orders.active;
-  if (order) {
-    ctx.fillStyle = PALETTE.green;
-    ctx.beginPath();
-    ctx.arc(x + order.pickup.x * sx, y + order.pickup.y * sy, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = PALETTE.gold;
-    ctx.beginPath();
-    ctx.arc(x + order.dest.x * sx, y + order.dest.y * sy, 4, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // The player, a white arrow pointing the way he faces.
-  const player = game.player;
-  ctx.save();
-  ctx.translate(x + player.x * sx, y + player.y * sy);
-  ctx.rotate(player.angle);
-  ctx.fillStyle = PALETTE.white;
-  ctx.beginPath();
-  ctx.moveTo(7, 0);
-  ctx.lineTo(-5, -5);
-  ctx.lineTo(-5, 5);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-  ctx.restore();
+  return { draw, drawFull };
 }

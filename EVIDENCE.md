@@ -1,60 +1,100 @@
-# OJEK! Raja Jalanan — evidence log
+# EVIDENCE — OJEK! King of the Streets (best-game-01)
 
-How this build was verified, per the open-game-skills evidence rules and the
-offline-game-revival "implemented vs verified" split. A feature is listed as
-**implemented** when the code exists, and **verified** only when a runtime
-check observed the state actually change. Conclusions come from numbers
-(window.G.state() and the scripted smoke test); screenshots are backup.
+Verification evidence for this build. "Implemented" means the code exists;
+"Verified" means it was run and observed in headless Chromium.
+Date: 2026-11-18 (WIB). Environment: Node v24.22.1, Playwright Chromium
+(headless, SwiftShader software renderer).
 
-Dispatcher routing: Phase A used action-feel/short-special, juice-vfx/punchy,
-hitstun-recover/light-stun. ENGINE: custom (vanilla JS + canvas 2D).
-DEFER: racing-feel, enemy-ai, quest-graph, world-map, save-checkpoint.
+## Local gate (run main.ts)
 
-## Checks
+- `MAKEFUN_OUTPUT_DIR=out node main.ts` run twice, byte-identical: PASS
+- game/ 2,386,404 bytes (<= 48 MiB), 37 entries (<= 993): PASS
+- game/index.html 2,383 bytes (<= 1 MiB): PASS
+- All references inside game/ (import map points at vendor three.js): PASS
+- 4 screenshots, each <= 256 KiB, 1280x720: PASS
+  (1-cover.jpg 104,033; 2-title.jpg 82,879; 3-skills.jpg 93,630;
+  4-results.jpg 74,241 bytes)
+- dossier.json from buildDossier, 642,209 bytes (<= 1.5 MiB),
+  keys cover, images, schema, text: PASS
+- Full `makefun check` needs a transcripts bundle (made by the parent at
+  submit time): NOT RUN here.
 
-| ID | Pass | Check | Result | Evidence |
-|----|------|-------|--------|----------|
-| S1 | smoke | Boot to title, no console errors | pass | verify-stage1.js: screen=title, tick=179, errors=[] |
-| S2 | smoke | Enter game, drive with real keys | pass | verify-stage1.js: speed 424 after 3s W, moved 945 |
-| S3 | functional | Order board opens with Q, 6 offers (5 + story) | pass | verify-stage1.js: screen=orders, boardOrders=6 |
-| S4 | functional | Full order: accept, pickup, deliver, commission paid | pass | ?autotest=1: order=pass, fare 57000, tip 17100 |
-| S5 | functional | Dealer purchase: buy Matic 110, owned after | pass | ?autotest=1: dealer=pass, owns matic-110 true |
-| S6 | functional | Combat: rival spawned, punched down, reward paid | pass | verify-stage2.js: enemies 1→0, money 50000→55000 |
-| S7 | functional | Save survives restart (money identical after reload) | pass | verify-stage2.js: moneyBefore=moneyAfter=125100 |
-| S8 | functional | Cover scene: moving, wanted 2, police 2, active order | pass | take-shots.js: speed 740, wanted 2, policeCars 2 |
-| S9 | functional | Chase scene: top speed, wanted 4, police 4 | pass | take-shots.js: speed 860, wanted 4, policeCars 4 |
-| S10 | functional | Dealer scene opens with money staged | pass | take-shots.js: screen=dealer, money 3050000 |
-| S11 | functional | On-foot scene at the market | pass | take-shots.js: screen=playing, speed 0, wanted 0 |
-| S12 | static | All 21 game modules pass node module syntax check | pass | node --input-type=module --check, 21/21 OK |
-| S13 | static | 4 screenshots 1280x720, each ≤256 KiB | pass | 1-cover 104243 B, 2-onfoot 93077 B, 3-dealer 114500 B, 4-chase 98286 B |
-| S14 | regression | Traffic crash loop (per-frame damage + rating drain) | pass | Fixed with 1s cooldown + bounce; re-ran S2/S4/S8 green |
-| S15 | regression | Order board 6th card overlapped the close button | pass | Fixed with 64px cards; re-ran S3 green |
-| S16 | regression | `light is not defined` froze the loop | pass | Fixed; loop now catches a bad step and keeps running |
-| S19 | functional | Random event closes a road (closure observed) | pass | verify-stage3.js: maxClosures=1 over 160s fast-forward |
-| S20 | functional | Upgrade + repair through the dealer UI | pass | verify-stage3.js: Ban Lv1 bought, condition 71→100 |
-| S21 | functional | Police bust: fine + rating loss + wanted cleared | pass | verify-stage3.js: money 50000→42500, rating 4.2→3.9 |
-| S17 | playtest | A human plays a full shift start to finish | not-run | Needs a real player; scripted scenes cover the systems |
-| S18 | soak | 30-minute stability run | not-run | Not run in this build |
+## Render (headless Chromium, ?shot=, seed 7)
 
-## Implemented vs verified
+- cover: game running, HUD + minimap + active order + police + traffic
+  visible, skill bar live (Nitro/Lay Low unlocked, Quick Fix on cooldown),
+  0 console errors. PASS (screenshots/1-cover.jpg)
+- title: title panel, 3 buttons, keys line, all inside the panel,
+  0 console errors. PASS (screenshots/2-title.jpg)
+- skills: phone on the Skills tab, 3 branches x 3 tiers, locked/unlocked
+  states, connector lines, no text overflow, 0 console errors.
+  PASS (screenshots/3-skills.jpg)
+- results: mission-complete panel with 6 stat rows + 2 buttons,
+  0 console errors. PASS (screenshots/4-results.jpg)
+- All 28 src/ modules parse as ES modules (vm.SourceTextModule). PASS
+- Layout pass on all 4 shots at 1280x720: spacing scale, bounds/overflow
+  on every element, squint test. PASS (one defect found and fixed: the HUD
+  skill bar peeked out from under the phone panel; it now hides while any
+  menu is open).
 
-- Implemented and verified at runtime: driving (foot + bike), order board and
-  full order flow, dealer purchase, upgrades and repairs (bought through the
-  real dealer UI), combat, wanted + police chase + bust (fine and rating loss
-  observed), save/load, day/shift/weather cycle (shifts Pagi→Siang→Sore
-  observed over fast-forwarded time), traffic lights (light state cycles
-  observed in the render), rating and streaks (observed in state), random
-  events (a road closure observed over fast-forwarded time).
-- Implemented, not yet verified on a live run: the full 5-mission story arc
-  end to end, the race rival arriving first, the begal night spawn, VIP and
-  rush-parcel event orders, and rush-hour traffic jams (trafficStopped read 0
-  in every short run). These run through the same update loop as the verified
-  systems, but no dedicated runtime check has observed them yet.
+## Smoke test gameplay (test-smoke.js) — 20/20 passed
 
-## Known deviations
+- Title start button works: PASS
+- Game state readable after start (mode playing, riding): PASS
+- Order accepted: PASS (order 1)
+- Order delivered, money increased: PASS (Rp 50,000 -> Rp 66,100)
+- Dealer opens from pause menu: PASS
+- Dealer purchase (City Matic 110) succeeds: PASS
+- Money decreased after purchase: PASS (Rp 1,616,100)
+- Skill tree opens with 9 nodes (3 branches x 3 tiers): PASS
+- Buy skill (Nitro Boost) via tree UI: PASS
+- Turbo Engine raises top speed (+15%): PASS (92 -> 106 km/h)
+- Tough Skin raises max health (+25): PASS (100 -> 125)
+- Buy skill (Ghost) via tree UI: PASS
+- Phone tabs (Map/Stats/Radio) show real content: PASS
+- Nitro Boost activates (burst + cooldown): PASS (cd 20s)
+- Quick Fix restores 40% condition, costs Rp 5,000: PASS
+  (condition 50 -> 90, money Rp 1,616,100 -> Rp 1,611,100)
+- Lay Low drops wanted by 1 star: PASS (wanted 3 -> 2)
+- Wanted set, police cars spawned: PASS (wanted 3, cars 4)
+- Busted after being pinned: PASS (wanted 0, money Rp 1,611,100 -> Rp 1,369,435)
+- Save persists across reload: PASS (Rp 1,369,435 -> Rp 1,369,435)
+- Zero console/page errors during smoke test: PASS
 
-- The scripted smoke test (?autotest=1) teleports the player between pickup
-  and destination. Its evidence is scripted-scene, not a natural clear.
-- Screenshots are staged scenes (?shot=cover|foot|dealer|chase) of the real
-  game running: real HUD, real traffic, real police. Staging only sets the
-  starting state; everything on screen is simulated live.
+## Systems (implemented vs verified)
+
+| System | Implemented | Verified |
+| --- | --- | --- |
+| 3D city, 5 districts, river + bridges | Yes | Render cover/title |
+| Traffic + traffic lights | Yes | Render cover |
+| Pedestrians + waiting passengers | Yes | Render cover |
+| Orders (5 types, surge fares, timers) | Yes | Smoke test |
+| Dealer 7 bikes + garage + upgrades + paint | Yes | Smoke test |
+| Fuel + service | Yes | Smoke test (Quick Fix) |
+| Rating + streak + 6 ranks | Yes | Smoke test (partial) |
+| Skill tree (3 branches x 3 tiers) | Yes | Smoke test |
+| Active skills (Nitro, Quick Fix, Lay Low) | Yes | Smoke test |
+| Phone tabs (Orders/Skills/Garage/Stats/Achievements/Map/Radio) | Yes | Smoke test |
+| Daily challenges + earnings log | Yes | Smoke test (tabs render) |
+| Wanted 5 tiers + police + helicopter | Yes | Smoke test |
+| Geng Macan story missions (7) | Yes | Not run |
+| Combat (punch, dodge, night muggers) | Yes | Not run |
+| Random road events + order surge | Yes | Not run |
+| Weather (clear/cloudy/rain) + day/night | Yes | Render (clear) |
+| Procedural radio + engine/siren audio | Yes | Not run (muted in tests) |
+| Achievements + tutorial + codex | Yes | Not run |
+| Save/load localStorage | Yes | Smoke test |
+| Minimap + HUD + mission results | Yes | Render cover/results |
+
+## Notes
+
+- SwiftShader (no GPU) runs ~3-4 fps; the game is built for desktop
+  Chrome with a GPU. Draw calls are cut with InstancedMesh for trees and
+  street lamps; shadow map 1024 on the software renderer.
+- All user-visible UI text is English. Indonesian remains only as
+  in-world flavor: place names (Pasar Sinar, Kampung Melati), the gang
+  name (Geng Macan), radio station "Dangdut 88", and shop signs painted
+  on buildings (TOKO KELONTONG, BENGKEL LAS). Internal ids
+  (penumpang/paket/makanan, pagi/siang/sore/malam) are code only.
+- Skill tiers are sequential: tier 2 requires tier 1 owned in the same
+  branch, tier 3 requires tier 2. Each tier costs 1 point.

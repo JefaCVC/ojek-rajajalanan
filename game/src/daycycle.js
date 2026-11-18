@@ -1,104 +1,98 @@
-// The day: a clock that runs one full day in six real minutes, four shifts with
-// different order types and traffic, rush hours that push prices up, and weather
-// that changes the fare and the grip. The render layer reads the light level and
-// the weather to paint the city; gameplay reads the shift and the multipliers.
+// OJEK! King of the Streets — time of day, sun and weather. One game day lasts
+// DAY_LENGTH seconds. The sun, sky, fog and street lights all follow the
+// hour; weather rolls on its own timer and changes fares, grip and fog.
 
-import { DAY, WEATHER } from './config.js';
+import * as THREE from 'three';
+import { DAY_LENGTH, WEATHER, shiftAt } from './config.js';
+import { worldRandom as rng } from './random.js';
 
-export function createDayCycle(random) {
-  let hour = DAY.startHour;
-  let weatherIndex = 0;
-  let weatherTimer = WEATHER.cycleSeconds * 0.5;
+const SKY_DAY = new THREE.Color(0x87b5e0);
+const SKY_DUSK = new THREE.Color(0xe8935a);
+const SKY_NIGHT = new THREE.Color(0x0e1626);
+const FOG_DAY = new THREE.Color(0xa8c4d8);
+const FOG_NIGHT = new THREE.Color(0x0e1626);
+const SUN_DAY = new THREE.Color(0xfff2d8);
+const SUN_DUSK = new THREE.Color(0xff9a4a);
 
-  function shiftFor(h) {
-    const wrapped = ((h % 24) + 24) % 24;
-    for (const shift of DAY.shifts) {
-      const from = shift.from;
-      const to = shift.to;
-      if (to <= 24) {
-        if (wrapped >= from && wrapped < to) return shift;
-      } else if (wrapped >= from || wrapped < to - 24) {
-        return shift;
-      }
+function smoothstep(a, b, x) {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+export function createDayCycle(scene) {
+  const sun = new THREE.DirectionalLight(0xfff2d8, 2.2);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -160;
+  sun.shadow.camera.right = 160;
+  sun.shadow.camera.top = 160;
+  sun.shadow.camera.bottom = -160;
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 500;
+  sun.shadow.bias = -0.0004;
+  scene.add(sun);
+  scene.add(sun.target);
+  const hemi = new THREE.HemisphereLight(0xbfd8ee, 0x8a7a5c, 0.9);
+  scene.add(hemi);
+  const amb = new THREE.AmbientLight(0xffffff, 0.25);
+  scene.add(amb);
+
+  let hour = 8.0;
+  let weather = 'clear';
+  let weatherTimer = rng.range(50, 90);
+  let nightFactor = 0;
+  let rainAmount = 0;
+
+  function update(dt, focus) {
+    hour = (hour + (dt * 24) / DAY_LENGTH) % 24;
+    weatherTimer -= dt;
+    if (weatherTimer <= 0) {
+      const roll = rng.next();
+      weather = roll < 0.5 ? 'clear' : roll < 0.78 ? 'cloudy' : 'rain';
+      weatherTimer = rng.range(55, 110);
     }
-    return DAY.shifts[3];
-  }
+    const targetRain = weather === 'rain' ? 1 : weather === 'cloudy' ? 0.15 : 0;
+    rainAmount += (targetRain - rainAmount) * Math.min(1, dt * 0.5);
 
-  function isRush(h) {
-    const wrapped = ((h % 24) + 24) % 24;
-    return DAY.rushHours.some(([from, to]) => wrapped >= from && wrapped < to);
-  }
+    // Sun angle: sunrise 6h, noon 12h, sunset 18h.
+    const dayT = (hour - 6) / 12;
+    const sunAngle = dayT * Math.PI;
+    const sunHeight = Math.sin(sunAngle);
+    const isDay = sunHeight > -0.08;
+    nightFactor = smoothstep(0.12, -0.12, sunHeight);
+    const duskFactor = (1 - Math.abs(sunHeight)) * (isDay ? 1 : 0.4);
 
-  function pickWeather() {
-    const roll = random();
-    let acc = 0;
-    for (let i = 0; i < WEATHER.types.length; i += 1) {
-      acc += WEATHER.types[i].weight;
-      if (roll <= acc) return i;
-    }
-    return 0;
-  }
+    const sky = new THREE.Color().copy(SKY_DAY).lerp(SKY_DUSK, duskFactor * 0.8).lerp(SKY_NIGHT, nightFactor);
+    scene.background = sky;
+    const fogColor = new THREE.Color().copy(FOG_DAY).lerp(FOG_NIGHT, nightFactor);
+    const fogNear = 90 - WEATHER[weather].fog * 45;
+    const fogFar = 420 - WEATHER[weather].fog * 260;
+    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
 
-  /** Light level 0..1: full sun at midday, dusk at 18:00, dark at night. */
-  function lightLevel(h) {
-    const wrapped = ((h % 24) + 24) % 24;
-    if (wrapped >= 6 && wrapped < 17) return 1;
-    if (wrapped >= 17 && wrapped < 19) return 1 - (wrapped - 17) / 2 * 0.55;
-    if (wrapped >= 19 || wrapped < 5) return 0.42;
-    if (wrapped >= 5 && wrapped < 6) return 0.42 + (wrapped - 5) * 0.58;
-    return 1;
+    const sunDist = 220;
+    sun.position.set(
+      focus.x + Math.cos(sunAngle) * sunDist,
+      Math.max(20, sunHeight * sunDist + 30),
+      focus.z + 60,
+    );
+    sun.target.position.set(focus.x, 0, focus.z);
+    sun.color.copy(SUN_DAY).lerp(SUN_DUSK, duskFactor);
+    sun.intensity = isDay ? 2.0 - duskFactor * 0.8 : 0.12;
+    hemi.intensity = 0.9 - nightFactor * 0.55;
+    amb.intensity = 0.25 - nightFactor * 0.1;
   }
 
   return {
-    /** Advances the clock and the weather. Returns events that happened this step. */
-    update(dt) {
-      const events = [];
-      const previousShift = shiftFor(hour).id;
-      const previousRush = isRush(hour);
-      hour += dt / DAY.secondsPerGameHour;
-      if (hour >= 30) hour -= 24;
-      const shift = shiftFor(hour);
-      if (shift.id !== previousShift) events.push({ type: 'shift', shift });
-      const rush = isRush(hour);
-      if (rush && !previousRush) events.push({ type: 'rush-start' });
-      if (!rush && previousRush) events.push({ type: 'rush-end' });
-      weatherTimer -= dt;
-      if (weatherTimer <= 0) {
-        weatherTimer = WEATHER.cycleSeconds;
-        const next = pickWeather();
-        if (next !== weatherIndex) {
-          weatherIndex = next;
-          events.push({ type: 'weather', weather: WEATHER.types[weatherIndex] });
-        }
-      }
-      return events;
-    },
+    update,
     get hour() { return hour; },
-    get shift() { return shiftFor(hour); },
-    get weather() { return WEATHER.types[weatherIndex]; },
-    get rush() { return isRush(hour); },
-    get light() { return lightLevel(hour); },
-    get night() { return shiftFor(hour).id === 'malam'; },
-    /** Combined fare multiplier from the shift, the rush hour, and the weather. */
-    get fareMultiplier() {
-      const shift = shiftFor(hour);
-      let mult = shift.surge * WEATHER.types[weatherIndex].fare;
-      if (isRush(hour)) mult *= 1.25;
-      return mult;
-    },
-    get gripMultiplier() { return WEATHER.types[weatherIndex].grip; },
-    get trafficMultiplier() { return shiftFor(hour).traffic; },
-    setHour(value) { hour = value; },
-    setWeather(id) {
-      const index = WEATHER.types.findIndex((w) => w.id === id);
-      if (index >= 0) weatherIndex = index;
-    },
-    serialize() { return { hour, weatherIndex, weatherTimer }; },
-    restore(data) {
-      if (!data) return;
-      hour = typeof data.hour === 'number' ? data.hour : DAY.startHour;
-      weatherIndex = data.weatherIndex || 0;
-      weatherTimer = data.weatherTimer || WEATHER.cycleSeconds;
-    },
+    setHour(h) { hour = ((h % 24) + 24) % 24; },
+    get weather() { return weather; },
+    setWeather(w) { if (WEATHER[w]) { weather = w; weatherTimer = 120; } },
+    get weatherInfo() { return WEATHER[weather]; },
+    get rainAmount() { return rainAmount; },
+    get nightFactor() { return nightFactor; },
+    get isNight() { return nightFactor > 0.6; },
+    get shift() { return shiftAt(hour); },
+    get sun() { return sun; },
   };
 }
