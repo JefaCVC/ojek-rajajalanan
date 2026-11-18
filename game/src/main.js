@@ -676,6 +676,7 @@ const game = {
   events,
   menus,
   ui,
+  camera: cameraRig,
   acceptOrder: (id) => orders.accept(id, player.pos),
   addXp,
   useSkill,

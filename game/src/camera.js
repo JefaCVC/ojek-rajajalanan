@@ -8,6 +8,7 @@ import * as THREE from 'three';
 export function createCamera(camera, city) {
   let yawOffset = 0;
   let pitchOffset = 0;
+  let shotYaw = null; // locked orbit angle for staged shots; null = free
   let distance = 7;
   let trauma = 0;
   let fov = 62;
@@ -25,12 +26,15 @@ export function createCamera(camera, city) {
   return {
     addTrauma(amount) { trauma = Math.min(1, trauma + amount); },
     setDistance(d) { distance = d; },
+    setShotYaw(y) { shotYaw = y; },
     update(dt, target, heading, speedKmh, orbit, wheel) {
       yawOffset += orbit.x * 0.004;
       pitchOffset = THREE.MathUtils.clamp(pitchOffset + orbit.y * 0.002, -0.25, 0.45);
       // The orbit eases back to straight behind the player when untouched.
       if (Math.abs(orbit.x) < 0.01) yawOffset *= Math.max(0, 1 - dt * 1.2);
       if (Math.abs(orbit.y) < 0.01) pitchOffset *= Math.max(0, 1 - dt * 1.2);
+      // A staged shot locks the orbit angle (3/4 rear view) instead.
+      if (shotYaw !== null) yawOffset = shotYaw;
       if (wheel !== 0) distance = THREE.MathUtils.clamp(distance + wheel * 0.003, 6, 14);
 
       const speedFactor = Math.min(1, speedKmh / 160);

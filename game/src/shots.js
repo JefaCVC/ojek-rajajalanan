@@ -20,11 +20,13 @@ export function createShots(game) {
   }
 
   function stageCover() {
-    // The fullest play view: riding with a passenger, an active order, two
-    // police cars on the tail, traffic around, late afternoon light.
+    // Rider-first cover: the ojek character large and centered, police kept
+    // far down the road — visible, but never near or overlapping the rider.
     game.daycycle.setHour(16.4);
     game.daycycle.setWeather('clear');
-    game.player.setPassenger(true);
+    // No passenger: from the chase cam a passenger sits between the camera
+    // and the rider and hides him. The order below is a parcel anyway.
+    game.player.setPassenger(false);
     // Unlock the active skills so the HUD skill bar shows them live:
     // Nitro and Lay Low ready, Quick Fix mid-cooldown.
     game.profile.skills = { speed: 1, business: 1, street: 2 };
@@ -33,22 +35,40 @@ export function createShots(game) {
     game.skillCd.fix = 30;
     const road = CITY.roadLine(5);
     placeOnRoad(road, CITY.roadLine(4) - 40, 0);
-    game.player.state.speed = 16;
-    const order = game.orders.accept(game.orders.board[0].id, game.player.pos);
+    // Green paint so the bike reads as one distinct shape under the rider.
+    if (game.player.state.entry) {
+      game.player.setEntry({ ...game.player.state.entry, paint: 0x2e9e5b });
+    }
+    game.player.state.speed = 9;
+    // Closer chase camera so the rider fills the frame (default is 7),
+    // locked at a 3/4 rear angle so the bike's side reads instead of being
+    // hidden behind the rider's body.
+    game.camera.setDistance(4.8);
+    game.camera.setShotYaw(0.38);
+    // A parcel/food/rush order (no passenger expected on the bike).
+    const board = game.orders.board;
+    const picked = board.find((o) => o.type === 'paket' || o.type === 'makanan' || o.type === 'kilat') || board[0];
+    const order = game.orders.accept(picked.id, game.player.pos);
     if (order) {
       // Skip to the delivery leg so the beacon and HUD show the destination.
       order.stage = 'deliver';
       game.orders.setBeacon(order.dest, 0xffd24a);
     }
     game.police.setWanted(2);
-    // Put the chase in frame: two police cars head-on ahead, one chasing behind.
+    // Police FAR down the road only, HELD in place: two cars head-on at 48
+    // and 64 ahead, one behind the camera. Held cars never chase, so the
+    // gap is deterministic — the rider closes ~10-18 during the settle and
+    // the cars still read as distant, small, and clearly separated from
+    // him. Their light bars keep flashing.
     const pz = game.player.pos.z;
     const cars = game.police.cars;
-    if (cars[0]) { cars[0].pos.set(road + 3, 0, pz + 32); cars[0].heading = Math.PI; cars[0].speed = 10; }
-    if (cars[1]) { cars[1].pos.set(road - 3, 0, pz + 48); cars[1].heading = Math.PI; cars[1].speed = 10; }
-    if (cars[2]) { cars[2].pos.set(road, 0, pz - 18); cars[2].heading = 0; cars[2].speed = 12; }
-    game.traffic.spawnVehicle({ vertical: true, line: road, dir: 1, along: pz + 70 });
-    game.traffic.spawnVehicle({ vertical: true, line: road, dir: -1, along: pz + 60 });
+    if (cars[0]) { cars[0].pos.set(road + 3, 0, pz + 48); cars[0].heading = Math.PI; cars[0].speed = 0; cars[0].held = true; }
+    if (cars[1]) { cars[1].pos.set(road - 3, 0, pz + 64); cars[1].heading = Math.PI; cars[1].speed = 0; cars[1].held = true; }
+    if (cars[2]) { cars[2].pos.set(road, 0, pz - 60); cars[2].heading = 0; cars[2].speed = 0; cars[2].held = true; }
+    // Civilian life well ahead, never near the rider: one same-direction
+    // car pulling away, one oncoming car far enough out to stay clear.
+    game.traffic.spawnVehicle({ vertical: true, line: road, dir: 1, along: pz + 45 });
+    game.traffic.spawnVehicle({ vertical: true, line: road, dir: -1, along: pz + 90 });
     game.ui.banner('VIP Order', 'Deliver before time runs out', 4000);
   }
 

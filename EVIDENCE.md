@@ -8,22 +8,24 @@ Date: 2026-11-18 (WIB). Environment: Node v24.22.1, Playwright Chromium
 ## Local gate (run main.ts)
 
 - `MAKEFUN_OUTPUT_DIR=out node main.ts` run twice, byte-identical: PASS
-- game/ 2,386,404 bytes (<= 48 MiB), 37 entries (<= 993): PASS
+- game/ 2,388,226 bytes (<= 48 MiB), 37 entries (<= 993): PASS
 - game/index.html 2,383 bytes (<= 1 MiB): PASS
 - All references inside game/ (import map points at vendor three.js): PASS
 - 4 screenshots, each <= 256 KiB, 1280x720: PASS
-  (1-cover.jpg 104,033; 2-title.jpg 82,879; 3-skills.jpg 93,630;
+  (1-cover.jpg 97,068; 2-title.jpg 82,879; 3-skills.jpg 93,630;
   4-results.jpg 74,241 bytes)
-- dossier.json from buildDossier, 642,209 bytes (<= 1.5 MiB),
+- dossier.json from buildDossier, 632,943 bytes (<= 1.5 MiB),
   keys cover, images, schema, text: PASS
 - Full `makefun check` needs a transcripts bundle (made by the parent at
   submit time): NOT RUN here.
 
 ## Render (headless Chromium, ?shot=, seed 7)
 
-- cover: game running, HUD + minimap + active order + police + traffic
-  visible, skill bar live (Nitro/Lay Low unlocked, Quick Fix on cooldown),
-  0 console errors. PASS (screenshots/1-cover.jpg)
+- cover: rider-first framing (see "Cover re-shoot" below), HUD + minimap
+  + active food order with timer + 2 wanted stars + skill bar live
+  (Nitro/Lay Low ready, Quick Fix on cooldown), 2 police cars held far
+  down the road with flashing light bars, 0 console errors.
+  PASS (screenshots/1-cover.jpg)
 - title: title panel, 3 buttons, keys line, all inside the panel,
   0 console errors. PASS (screenshots/2-title.jpg)
 - skills: phone on the Skills tab, 3 branches x 3 tiers, locked/unlocked
@@ -85,6 +87,28 @@ Date: 2026-11-18 (WIB). Environment: Node v24.22.1, Playwright Chromium
 | Achievements + tutorial + codex | Yes | Not run |
 | Save/load localStorage | Yes | Smoke test |
 | Minimap + HUD + mission results | Yes | Render cover/results |
+
+## Cover re-shoot (2026-11-18, after Krstan's feedback)
+
+- Problem: in the first cover the rider visually merged with a police car
+  placed close ahead of him (white car body + white bike slab), so the
+  rider was hard to read. Krstan: focus on the ojek character; a police
+  car far away is fine, even better.
+- Fix (shots.js stageCover, camera.js, police.js, main.js):
+  no passenger (it hid the rider from the chase cam); closer chase
+  camera (distance 4.8, was 7) locked at a 3/4 rear angle
+  (new camera.setShotYaw) so the bike's side reads; green bike paint;
+  parcel/food/rush order only (no passenger expected); police cars
+  HELD (new per-car `held` flag in police.js: no chase movement, light
+  bar still flashes) at 48 and 64 ahead with a third behind the camera —
+  at shot time they read as small, distant, clearly separated from the
+  rider; civilian cars well ahead only.
+- Verified in headless Chromium (?shot=cover&seed=7): rider large,
+  centered, unmistakable subject; nearest police car ~35 units ahead,
+  no overlap or blending; HUD + minimap + skill bar visible, no text
+  overflow on any element; 1280x720, 97,068 bytes (<= 256 KiB);
+  0 console/page errors. PASS.
+- Other 3 screenshots untouched.
 
 ## Notes
 

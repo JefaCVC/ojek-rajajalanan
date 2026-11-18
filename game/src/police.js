@@ -109,30 +109,35 @@ export function createPolice(scene, city, audio) {
       const dist = Math.hypot(dx, dz);
       closest = Math.min(closest, dist);
       if (dist < 90) anyNear = true;
-      const targetHeading = Math.atan2(dx, dz);
-      let dh = targetHeading - c.heading;
-      while (dh > Math.PI) dh -= Math.PI * 2;
-      while (dh < -Math.PI) dh += Math.PI * 2;
-      const maxSpeed = 16 + wanted * 2.2;
-      c.heading += THREE.MathUtils.clamp(dh, -2.2 * dt, 2.2 * dt);
-      const want = dist > 4 ? maxSpeed : 0;
-      c.speed += (want - c.speed) * Math.min(1, dt * 1.5);
-      const prevX = c.pos.x;
-      const prevZ = c.pos.z;
-      c.pos.x += Math.sin(c.heading) * c.speed * dt;
-      c.pos.z += Math.cos(c.heading) * c.speed * dt;
-      const hit = city.resolveCircle(c.pos, 1.4);
-      const moved = Math.hypot(c.pos.x - prevX, c.pos.z - prevZ);
-      if (c.speed > 3 && moved < c.speed * dt * 0.3) {
-        c.stuck += dt;
-        if (c.stuck > 4) {
-          // Stuck on a building: respawn on a road near the player.
-          const p = city.randomRoadPoint(rng);
-          c.pos.set(p.x, 0, p.z);
+      // A held car (staged shots) stays exactly where it was placed: no
+      // steering, no movement, no stuck-respawn. Its light bar still
+      // flashes below, and the mesh still syncs to its position.
+      if (!c.held) {
+        const targetHeading = Math.atan2(dx, dz);
+        let dh = targetHeading - c.heading;
+        while (dh > Math.PI) dh -= Math.PI * 2;
+        while (dh < -Math.PI) dh += Math.PI * 2;
+        const maxSpeed = 16 + wanted * 2.2;
+        c.heading += THREE.MathUtils.clamp(dh, -2.2 * dt, 2.2 * dt);
+        const want = dist > 4 ? maxSpeed : 0;
+        c.speed += (want - c.speed) * Math.min(1, dt * 1.5);
+        const prevX = c.pos.x;
+        const prevZ = c.pos.z;
+        c.pos.x += Math.sin(c.heading) * c.speed * dt;
+        c.pos.z += Math.cos(c.heading) * c.speed * dt;
+        const hit = city.resolveCircle(c.pos, 1.4);
+        const moved = Math.hypot(c.pos.x - prevX, c.pos.z - prevZ);
+        if (c.speed > 3 && moved < c.speed * dt * 0.3) {
+          c.stuck += dt;
+          if (c.stuck > 4) {
+            // Stuck on a building: respawn on a road near the player.
+            const p = city.randomRoadPoint(rng);
+            c.pos.set(p.x, 0, p.z);
+            c.stuck = 0;
+          }
+        } else {
           c.stuck = 0;
         }
-      } else {
-        c.stuck = 0;
       }
       c.built.group.position.copy(c.pos);
       c.built.group.rotation.y = c.heading;
